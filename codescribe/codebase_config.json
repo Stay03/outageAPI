@@ -1,0 +1,19 @@
+{
+    "ignore_patterns": ["package-lock.json","README.md", ".vscode", "codescribe", "env", "venv", ".git", "codebase_snapshot.md", "node_modules", "public"],
+    "ignore_extensions": [".log", ".tmp", ".gitignore"],
+    "list_only_extensions": [".png",".jpg",".jpeg",".gif",".ico",".svg",".db",".sqlite",".pdf",".zip"],
+    "max_file_size_mb": 5,
+    "include_paths": [
+
+        "app/Models/User.php",
+        "app/Models/Outage.php",
+        "app/Models/Location.php",
+        "app/Http/Resources/CollectionResource.php",
+        "app/Http/Resources/UserResource.php",
+        "app/Http/Resources/OutageResource.php",
+        "app/Http/Controllers/AuthController.php",
+        "app/Http/Controllers/OutageController.php",
+        "app/Policies/OutagePolicy.php",
+        "routes/api.php"
+      ]
+}
