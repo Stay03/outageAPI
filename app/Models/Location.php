@@ -15,6 +15,7 @@ class Location extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'user_id',
         'name',
         'address',
         'locality',
@@ -34,6 +35,14 @@ class Location extends Model
         'longitude' => 'float',
     ];
 
+    /**
+     * Get the user that owns the location.
+     */
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+    
     /**
      * Get all of the outages for the location.
      */

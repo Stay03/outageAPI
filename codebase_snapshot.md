@@ -1,20 +1,24 @@
 # Codebase Documentation
 
 {
-  "Extraction Date": "2025-04-22 22:06:57",
+  "Extraction Date": "2025-04-23 06:37:17",
   "Include Paths": [
     "app/Models/User.php",
     "app/Models/Outage.php",
     "app/Models/Location.php",
+    "app/Services/WeatherService.php",
     "app/Http/Resources/CollectionResource.php",
     "app/Http/Resources/UserResource.php",
     "app/Http/Resources/OutageResource.php",
     "app/Http/Resources/LocationResource.php",
+    "app/Http/Requests/OutageRequest.php",
     "app/Http/Controllers/AuthController.php",
     "app/Http/Controllers/OutageController.php",
     "app/Http/Controllers/LocationController.php",
+    "app/Exceptions/WeatherServiceException.php",
     "app/Policies/OutagePolicy.php",
     "app/Policies/LocationPolicy.php",
+    "config/services.php",
     "routes/api.php"
   ]
 }
@@ -106,6 +110,10 @@ class Outage extends Model
         'precipitation',
         'day_of_week',
         'is_holiday',
+        // Additional weather fields
+        'humidity',
+        'pressure',
+        'cloud',
     ];
 
     /**
@@ -121,6 +129,10 @@ class Outage extends Model
         'precipitation' => 'float',
         'day_of_week' => 'integer',
         'is_holiday' => 'boolean',
+        // Additional weather field casts
+        'humidity' => 'integer',
+        'pressure' => 'float',
+        'cloud' => 'integer',
     ];
 
     /**
@@ -375,6 +387,102 @@ class Location extends Model
 }
 ```
 
+### app/Services/WeatherService.php
+```
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\ConnectionException;
+
+class WeatherService
+{
+    /**
+     * The Weather API base URL.
+     *
+     * @var string
+     */
+    protected $baseUrl;
+
+    /**
+     * The Weather API key.
+     *
+     * @var string
+     */
+    protected $apiKey;
+
+    /**
+     * Create a new weather service instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        $this->baseUrl = config('services.weather.url');
+        $this->apiKey = config('services.weather.key');
+    }
+
+    /**
+     * Get current weather data for a specific location.
+     *
+     * @param float $latitude
+     * @param float $longitude
+     * @return array|null
+     */
+    public function getCurrentWeather($latitude, $longitude)
+    {
+        try {
+            $response = Http::get("{$this->baseUrl}/current.json", [
+                'key' => $this->apiKey,
+                'q' => "{$latitude},{$longitude}",
+                'aqi' => 'no',
+            ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return $this->formatWeatherData($data);
+            } else {
+                Log::error('Weather API error', [
+                    'status' => $response->status(),
+                    'response' => $response->body(),
+                    'coordinates' => "{$latitude},{$longitude}"
+                ]);
+                return null;
+            }
+        } catch (ConnectionException $e) {
+            Log::error('Weather API connection error', [
+                'message' => $e->getMessage(),
+                'coordinates' => "{$latitude},{$longitude}"
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Format the weather API response into our application format.
+     *
+     * @param array $data
+     * @return array
+     */
+    protected function formatWeatherData($data)
+    {
+        // Map the API response to our application's format
+        return [
+            'weather_condition' => $data['current']['condition']['text'],
+            'temperature' => $data['current']['temp_c'],
+            'wind_speed' => $data['current']['wind_kph'],
+            'precipitation' => $data['current']['precip_mm'],
+            // Additional fields that might be useful
+            'humidity' => $data['current']['humidity'],
+            'pressure' => $data['current']['pressure_mb'],
+            'cloud' => $data['current']['cloud'],
+        ];
+    }
+}
+```
+
 ### app/Http/Resources/CollectionResource.php
 ```
 <?php
@@ -490,10 +598,16 @@ class OutageResource extends JsonResource
                     'longitude' => $this->location->longitude,
                 ];
             }),
-            'weather_condition' => $this->weather_condition,
-            'temperature' => $this->temperature,
-            'wind_speed' => $this->wind_speed,
-            'precipitation' => $this->precipitation,
+            'weather' => [
+                'condition' => $this->weather_condition,
+                'temperature' => $this->temperature,
+                'wind_speed' => $this->wind_speed,
+                'precipitation' => $this->precipitation,
+                // Additional weather data
+                'humidity' => $this->when($this->humidity, $this->humidity),
+                'pressure' => $this->when($this->pressure, $this->pressure),
+                'cloud' => $this->when($this->cloud, $this->cloud),
+            ],
             'day_of_week' => $this->day_of_week,
             'is_holiday' => $this->is_holiday,
             'created_at' => $this->created_at,
@@ -533,6 +647,68 @@ class LocationResource extends JsonResource
             'full_address' => $this->full_address,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
+        ];
+    }
+}
+```
+
+### app/Http/Requests/OutageRequest.php
+```
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+class OutageRequest extends FormRequest
+{
+    /**
+     * Determine if the user is authorized to make this request.
+     *
+     * @return bool
+     */
+    public function authorize()
+    {
+        return true; // Authorization will be handled by policies
+    }
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array
+     */
+    public function rules()
+    {
+        $rules = [
+            'start_time' => 'required|date',
+            'end_time' => 'required|date|after:start_time',
+            'location_id' => 'required|exists:locations,id',
+            'is_holiday' => 'required|boolean',
+        ];
+
+        // For updates, make fields optional
+        if ($this->isMethod('PUT') || $this->isMethod('PATCH')) {
+            $rules = array_map(function ($rule) {
+                return str_replace('required', 'sometimes|required', $rule);
+            }, $rules);
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Get custom messages for validator errors.
+     *
+     * @return array
+     */
+    public function messages()
+    {
+        return [
+            'location_id.required' => 'A location is required to fetch weather data.',
+            'location_id.exists' => 'The selected location is invalid.',
+            'start_time.required' => 'Please specify when the outage started.',
+            'end_time.required' => 'Please specify when the outage ended.',
+            'end_time.after' => 'The end time must be after the start time.',
         ];
     }
 }
@@ -669,16 +845,36 @@ class AuthController extends Controller
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\OutageRequest;
 use App\Http\Resources\CollectionResource;
 use App\Http\Resources\OutageResource;
+use App\Models\Location;
 use App\Models\Outage;
+use App\Services\WeatherService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
-
 class OutageController extends Controller
 {
+    /**
+     * The weather service instance.
+     *
+     * @var \App\Services\WeatherService
+     */
+    protected $weatherService;
+
+    /**
+     * Create a new controller instance.
+     *
+     * @param  \App\Services\WeatherService  $weatherService
+     * @return void
+     */
+    public function __construct(WeatherService $weatherService)
+    {
+        $this->weatherService = $weatherService;
+    }
+
     /**
      * Display a listing of outages for the authenticated user.
      *
@@ -742,38 +938,39 @@ class OutageController extends Controller
     /**
      * Store a newly created outage in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  \App\Http\Requests\OutageRequest  $request
      * @return \Illuminate\Http\Response
      */
-    public function store(Request $request)
+    public function store(OutageRequest $request)
     {
-        $validator = Validator::make($request->all(), [
-            'start_time' => 'required|date',
-            'end_time' => 'required|date|after:start_time',
-            'location_id' => 'nullable|exists:locations,id',
-            'weather_condition' => 'required|string',
-            'temperature' => 'required|numeric|between:-50,60',
-            'wind_speed' => 'required|numeric|min:0',
-            'precipitation' => 'required|numeric|min:0',
-            'is_holiday' => 'required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        // Create a new outage
-        $outage = new Outage($request->all());
+        // Create a new outage with validated data
+        $outage = new Outage($request->validated());
         $outage->user_id = $request->user()->id;
         
         // Calculate day_of_week automatically based on start_time
         $startTime = Carbon::parse($request->input('start_time'));
         $outage->day_of_week = $startTime->dayOfWeek;
         
+        // Get the location to fetch weather data
+        $location = Location::findOrFail($request->input('location_id'));
+        
+        // Fetch weather data using the location's coordinates
+        $weatherData = $this->weatherService->getCurrentWeather($location->latitude, $location->longitude);
+        
+        if ($weatherData) {
+            // Fill the outage with weather data
+            $outage->fill($weatherData);
+        } else {
+            // If weather data fetching fails, return an error
+            return response()->json([
+                'message' => 'Unable to fetch weather data. Please try again later.',
+            ], 503); // 503 Service Unavailable
+        }
+        
         $outage->save();
 
         return response()->json([
-            'message' => 'Outage created successfully',
+            'message' => 'Outage created successfully with automatically fetched weather data',
             'outage' => new OutageResource($outage)
         ], 201);
     }
@@ -799,39 +996,42 @@ class OutageController extends Controller
     /**
      * Update the specified outage in storage.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  \App\Http\Requests\OutageRequest  $request
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, $id)
+    public function update(OutageRequest $request, $id)
     {
         $outage = Outage::findOrFail($id);
 
         // Verify ownership
         $this->authorize('update', $outage);
 
-        $validator = Validator::make($request->all(), [
-            'start_time' => 'sometimes|required|date',
-            'end_time' => 'sometimes|required|date|after:start_time',
-            'location_id' => 'nullable|exists:locations,id',
-            'weather_condition' => 'sometimes|required|string',
-            'temperature' => 'sometimes|required|numeric|between:-50,60',
-            'wind_speed' => 'sometimes|required|numeric|min:0',
-            'precipitation' => 'sometimes|required|numeric|min:0',
-            'is_holiday' => 'sometimes|required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        // Update the outage
-        $outage->fill($request->all());
+        // Update the outage with validated data
+        $outage->fill($request->validated());
 
         // If start_time is changing, update day_of_week
         if ($request->has('start_time')) {
             $startTime = Carbon::parse($request->input('start_time'));
             $outage->day_of_week = $startTime->dayOfWeek;
+        }
+        
+        // If location is changing, update weather data
+        if ($request->has('location_id')) {
+            $location = Location::findOrFail($request->input('location_id'));
+            
+            // Fetch weather data using the location's coordinates
+            $weatherData = $this->weatherService->getCurrentWeather($location->latitude, $location->longitude);
+            
+            if ($weatherData) {
+                // Fill the outage with weather data
+                $outage->fill($weatherData);
+            } else {
+                // If weather data fetching fails, return an error
+                return response()->json([
+                    'message' => 'Unable to fetch weather data. Please try again later.',
+                ], 503); // 503 Service Unavailable
+            }
         }
         
         $outage->save();
@@ -1078,6 +1278,50 @@ class LocationController extends Controller
 }
 ```
 
+### app/Exceptions/WeatherServiceException.php
+```
+<?php
+
+namespace App\Exceptions;
+
+use Exception;
+
+class WeatherServiceException extends Exception
+{
+    /**
+     * The coordinates that failed to fetch weather data.
+     *
+     * @var string
+     */
+    protected $coordinates;
+
+    /**
+     * Create a new weather service exception instance.
+     *
+     * @param  string  $message
+     * @param  string  $coordinates
+     * @param  int  $code
+     * @param  \Throwable|null  $previous
+     * @return void
+     */
+    public function __construct($message = "", $coordinates = "", $code = 0, Throwable $previous = null)
+    {
+        parent::__construct($message, $code, $previous);
+        $this->coordinates = $coordinates;
+    }
+
+    /**
+     * Get the coordinates that failed to fetch weather data.
+     *
+     * @return string
+     */
+    public function getCoordinates()
+    {
+        return $this->coordinates;
+    }
+}
+```
+
 ### app/Policies/OutagePolicy.php
 ```
 <?php
@@ -1234,6 +1478,49 @@ class LocationPolicy
         return true;
     }
 }
+```
+
+### config/services.php
+```
+<?php
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Third Party Services
+    |--------------------------------------------------------------------------
+    |
+    | This file is for storing the credentials for third party services such
+    | as Mailgun, Postmark, AWS and more. This file provides the de facto
+    | location for this type of information, allowing packages to have
+    | a conventional file to locate the various service credentials.
+    |
+    */
+
+    'mailgun' => [
+        'domain' => env('MAILGUN_DOMAIN'),
+        'secret' => env('MAILGUN_SECRET'),
+        'endpoint' => env('MAILGUN_ENDPOINT', 'api.mailgun.net'),
+        'scheme' => 'https',
+    ],
+
+    'postmark' => [
+        'token' => env('POSTMARK_TOKEN'),
+    ],
+
+    'ses' => [
+        'key' => env('AWS_ACCESS_KEY_ID'),
+        'secret' => env('AWS_SECRET_ACCESS_KEY'),
+        'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+    ],
+    'weather' => [
+        'key' => env('WEATHER_API_KEY'),
+        'url' => env('WEATHER_API_URL', 'http://api.weatherapi.com/v1'),
+    ],
+
+];
+
 ```
 
 ### routes/api.php

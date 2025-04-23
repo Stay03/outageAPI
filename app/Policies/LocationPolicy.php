@@ -18,7 +18,7 @@ class LocationPolicy
      */
     public function viewAny(User $user)
     {
-        return true; // Authenticated users can view locations
+        return true; // Users can view their own locations (filtered in controller)
     }
 
     /**
@@ -30,9 +30,8 @@ class LocationPolicy
      */
     public function view(User $user, Location $location)
     {
-        // Locations can be viewed by any authenticated user
-        // This could be modified if locations become user-specific
-        return true;
+        // User can only view their own locations
+        return $user->id === $location->user_id;
     }
 
     /**
@@ -55,9 +54,8 @@ class LocationPolicy
      */
     public function update(User $user, Location $location)
     {
-        // For now, any authenticated user can update locations
-        // You might want to implement ownership for locations in the future
-        return true;
+        // User can only update their own locations
+        return $user->id === $location->user_id;
     }
 
     /**
@@ -70,11 +68,11 @@ class LocationPolicy
     public function delete(User $user, Location $location)
     {
         // Check if location has any associated outages
-        // Prevent deletion if outages exist
         if ($location->outages()->count() > 0) {
             return false;
         }
         
-        return true;
+        // User can only delete their own locations
+        return $user->id === $location->user_id;
     }
 }

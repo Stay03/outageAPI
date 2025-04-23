@@ -49,4 +49,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(Outage::class);
     }
+    
+    /**
+     * Get the locations for the user.
+     */
+    public function locations()
+    {
+        return $this->hasMany(Location::class);
+    }
 }

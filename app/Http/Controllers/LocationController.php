@@ -19,7 +19,8 @@ class LocationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Location::query();
+        // Only get locations belonging to the authenticated user
+        $query = $request->user()->locations();
 
         // Apply filters
         if ($request->has('city')) {
@@ -87,20 +88,23 @@ class LocationController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Check for duplicate locations
-        $existingLocation = Location::where('latitude', $request->input('latitude'))
+        // Check for duplicate locations for the current user
+        $existingLocation = $request->user()->locations()
+                                    ->where('latitude', $request->input('latitude'))
                                     ->where('longitude', $request->input('longitude'))
                                     ->first();
 
         if ($existingLocation) {
             return response()->json([
-                'message' => 'A location with these coordinates already exists',
+                'message' => 'A location with these coordinates already exists in your account',
                 'location' => new LocationResource($existingLocation)
             ], 409);
         }
 
-        // Create a new location
-        $location = Location::create($request->all());
+        // Create a new location and assign the user_id
+        $location = new Location($request->all());
+        $location->user_id = $request->user()->id;
+        $location->save();
 
         return response()->json([
             'message' => 'Location created successfully',
@@ -154,19 +158,20 @@ class LocationController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // If coordinates are changing, check for duplicates
+        // If coordinates are changing, check for duplicates within the user's locations
         if ($request->has('latitude') || $request->has('longitude')) {
             $lat = $request->input('latitude', $location->latitude);
             $lng = $request->input('longitude', $location->longitude);
             
-            $existingLocation = Location::where('id', '!=', $id)
+            $existingLocation = $request->user()->locations()
+                                        ->where('id', '!=', $id)
                                         ->where('latitude', $lat)
                                         ->where('longitude', $lng)
                                         ->first();
             
             if ($existingLocation) {
                 return response()->json([
-                    'message' => 'A location with these coordinates already exists',
+                    'message' => 'A location with these coordinates already exists in your account',
                     'location' => new LocationResource($existingLocation)
                 ], 409);
             }

@@ -7,15 +7,19 @@
     "app/Models/User.php",
     "app/Models/Outage.php",
     "app/Models/Location.php",
+    "app/Services/WeatherService.php",
     "app/Http/Resources/CollectionResource.php",
     "app/Http/Resources/UserResource.php",
     "app/Http/Resources/OutageResource.php",
     "app/Http/Resources/LocationResource.php",
+    "app/Http/Requests/OutageRequest.php",
     "app/Http/Controllers/AuthController.php",
     "app/Http/Controllers/OutageController.php",
     "app/Http/Controllers/LocationController.php",
+    "app/Exceptions/WeatherServiceException.php",
     "app/Policies/OutagePolicy.php",
     "app/Policies/LocationPolicy.php",
+    "config/services.php",
     "routes/api.php"
   ]
 }
