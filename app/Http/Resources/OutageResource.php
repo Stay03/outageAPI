@@ -18,8 +18,9 @@ class OutageResource extends JsonResource
             'id' => $this->id,
             'user_id' => $this->user_id,
             'start_time' => $this->start_time,
-            'end_time' => $this->end_time,
+            'end_time' => $this->when($this->end_time, $this->end_time),
             'duration' => $this->duration, // This is a calculated attribute from the model
+            'status' => $this->status, // New calculated attribute: 'ongoing' or 'completed'
             'location' => $this->when($this->location_id, function () {
                 return [
                     'id' => $this->location->id,

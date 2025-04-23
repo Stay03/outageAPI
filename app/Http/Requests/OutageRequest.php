@@ -25,7 +25,7 @@ class OutageRequest extends FormRequest
     {
         $rules = [
             'start_time' => 'required|date',
-            'end_time' => 'required|date|after:start_time',
+            'end_time' => 'nullable|date|after:start_time',
             'location_id' => 'required|exists:locations,id',
             'is_holiday' => 'required|boolean',
         ];
@@ -51,7 +51,6 @@ class OutageRequest extends FormRequest
             'location_id.required' => 'A location is required to fetch weather data.',
             'location_id.exists' => 'The selected location is invalid.',
             'start_time.required' => 'Please specify when the outage started.',
-            'end_time.required' => 'Please specify when the outage ended.',
             'end_time.after' => 'The end time must be after the start time.',
         ];
     }

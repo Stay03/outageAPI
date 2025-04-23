@@ -36,6 +36,9 @@ Route::prefix('v1')->group(function () {
         // Outage routes
         Route::apiResource('outages', OutageController::class);
         
+        // Add specific route for ending an outage
+        Route::patch('outages/{id}/end', [OutageController::class, 'end']);
+        
         // Location routes
         Route::apiResource('locations', LocationController::class);
         

@@ -1,7 +1,7 @@
 # Codebase Documentation
 
 {
-  "Extraction Date": "2025-04-23 06:37:17",
+  "Extraction Date": "2025-04-23 08:40:19",
   "Include Paths": [
     "app/Models/User.php",
     "app/Models/Outage.php",
@@ -76,8 +76,15 @@ class User extends Authenticatable
     {
         return $this->hasMany(Outage::class);
     }
+    
+    /**
+     * Get the locations for the user.
+     */
+    public function locations()
+    {
+        return $this->hasMany(Location::class);
+    }
 }
-
 ```
 
 ### app/Models/Outage.php
@@ -274,6 +281,7 @@ class Location extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'user_id',
         'name',
         'address',
         'locality',
@@ -293,6 +301,14 @@ class Location extends Model
         'longitude' => 'float',
     ];
 
+    /**
+     * Get the user that owns the location.
+     */
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+    
     /**
      * Get all of the outages for the location.
      */
@@ -637,6 +653,7 @@ class LocationResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'user_id' => $this->user_id,
             'name' => $this->name,
             'address' => $this->address,
             'locality' => $this->when($this->locality, $this->locality),
@@ -1087,7 +1104,8 @@ class LocationController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Location::query();
+        // Only get locations belonging to the authenticated user
+        $query = $request->user()->locations();
 
         // Apply filters
         if ($request->has('city')) {
@@ -1155,20 +1173,23 @@ class LocationController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Check for duplicate locations
-        $existingLocation = Location::where('latitude', $request->input('latitude'))
+        // Check for duplicate locations for the current user
+        $existingLocation = $request->user()->locations()
+                                    ->where('latitude', $request->input('latitude'))
                                     ->where('longitude', $request->input('longitude'))
                                     ->first();
 
         if ($existingLocation) {
             return response()->json([
-                'message' => 'A location with these coordinates already exists',
+                'message' => 'A location with these coordinates already exists in your account',
                 'location' => new LocationResource($existingLocation)
             ], 409);
         }
 
-        // Create a new location
-        $location = Location::create($request->all());
+        // Create a new location and assign the user_id
+        $location = new Location($request->all());
+        $location->user_id = $request->user()->id;
+        $location->save();
 
         return response()->json([
             'message' => 'Location created successfully',
@@ -1222,19 +1243,20 @@ class LocationController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // If coordinates are changing, check for duplicates
+        // If coordinates are changing, check for duplicates within the user's locations
         if ($request->has('latitude') || $request->has('longitude')) {
             $lat = $request->input('latitude', $location->latitude);
             $lng = $request->input('longitude', $location->longitude);
             
-            $existingLocation = Location::where('id', '!=', $id)
+            $existingLocation = $request->user()->locations()
+                                        ->where('id', '!=', $id)
                                         ->where('latitude', $lat)
                                         ->where('longitude', $lng)
                                         ->first();
             
             if ($existingLocation) {
                 return response()->json([
-                    'message' => 'A location with these coordinates already exists',
+                    'message' => 'A location with these coordinates already exists in your account',
                     'location' => new LocationResource($existingLocation)
                 ], 409);
             }
@@ -1418,7 +1440,7 @@ class LocationPolicy
      */
     public function viewAny(User $user)
     {
-        return true; // Authenticated users can view locations
+        return true; // Users can view their own locations (filtered in controller)
     }
 
     /**
@@ -1430,9 +1452,8 @@ class LocationPolicy
      */
     public function view(User $user, Location $location)
     {
-        // Locations can be viewed by any authenticated user
-        // This could be modified if locations become user-specific
-        return true;
+        // User can only view their own locations
+        return $user->id === $location->user_id;
     }
 
     /**
@@ -1455,9 +1476,8 @@ class LocationPolicy
      */
     public function update(User $user, Location $location)
     {
-        // For now, any authenticated user can update locations
-        // You might want to implement ownership for locations in the future
-        return true;
+        // User can only update their own locations
+        return $user->id === $location->user_id;
     }
 
     /**
@@ -1470,12 +1490,12 @@ class LocationPolicy
     public function delete(User $user, Location $location)
     {
         // Check if location has any associated outages
-        // Prevent deletion if outages exist
         if ($location->outages()->count() > 0) {
             return false;
         }
         
-        return true;
+        // User can only delete their own locations
+        return $user->id === $location->user_id;
     }
 }
 ```

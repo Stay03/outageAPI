@@ -49,11 +49,22 @@ class OutageController extends Controller
         }
 
         if ($request->has('end_date')) {
-            $query->where('end_time', '<=', $request->input('end_date'));
+            $query->where(function($q) use ($request) {
+                $q->where('end_time', '<=', $request->input('end_date'))
+                  ->orWhereNull('end_time');
+            });
         }
 
         if ($request->has('duration_min')) {
             $query->durationBetween($request->input('duration_min'), $request->input('duration_max', PHP_INT_MAX));
+        }
+
+        if ($request->has('status')) {
+            if ($request->input('status') === 'ongoing') {
+                $query->ongoing();
+            } elseif ($request->input('status') === 'completed') {
+                $query->completed();
+            }
         }
 
         if ($request->has('weather_condition')) {
@@ -127,8 +138,10 @@ class OutageController extends Controller
         
         $outage->save();
 
+        $message = $outage->end_time ? 'Outage created successfully' : 'Ongoing outage created successfully';
+
         return response()->json([
-            'message' => 'Outage created successfully with automatically fetched weather data',
+            'message' => $message,
             'outage' => new OutageResource($outage)
         ], 201);
     }
@@ -196,6 +209,55 @@ class OutageController extends Controller
 
         return response()->json([
             'message' => 'Outage updated successfully',
+            'outage' => new OutageResource($outage)
+        ]);
+    }
+
+    /**
+     * End an ongoing outage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function end(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'end_time' => 'required|date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $outage = Outage::findOrFail($id);
+
+        // Verify ownership
+        $this->authorize('update', $outage);
+
+        // Check if outage is already ended
+        if ($outage->end_time !== null) {
+            return response()->json([
+                'message' => 'This outage has already been ended.',
+                'outage' => new OutageResource($outage)
+            ], 422);
+        }
+
+        // Validate that end_time is after start_time
+        $endTime = Carbon::parse($request->input('end_time'));
+        if ($endTime->isBefore($outage->start_time)) {
+            return response()->json([
+                'message' => 'End time must be after start time.',
+                'errors' => ['end_time' => ['End time must be after start time.']]
+            ], 422);
+        }
+
+        // Update the end time
+        $outage->end_time = $request->input('end_time');
+        $outage->save();
+
+        return response()->json([
+            'message' => 'Outage has been marked as ended',
             'outage' => new OutageResource($outage)
         ]);
     }

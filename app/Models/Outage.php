@@ -56,7 +56,7 @@ class Outage extends Model
      *
      * @var array
      */
-    protected $appends = ['duration'];
+    protected $appends = ['duration', 'status'];
 
     /**
      * Get the user that owns the outage.
@@ -76,16 +76,32 @@ class Outage extends Model
 
     /**
      * Calculate the duration of the outage in minutes.
+     * For ongoing outages (null end_time), returns elapsed time since start.
      * 
-     * @return int
+     * @return int|null
      */
     public function getDurationAttribute()
     {
-        if (!$this->start_time || !$this->end_time) {
-            return 0;
+        if (!$this->start_time) {
+            return null;
+        }
+        
+        if (!$this->end_time) {
+            // If end_time is null, calculate duration from start_time to now
+            return $this->start_time->diffInMinutes(Carbon::now());
         }
         
         return $this->start_time->diffInMinutes($this->end_time);
+    }
+
+    /**
+     * Get the status of the outage.
+     * 
+     * @return string
+     */
+    public function getStatusAttribute()
+    {
+        return $this->end_time === null ? 'ongoing' : 'completed';
     }
 
     /**
@@ -106,6 +122,28 @@ class Outage extends Model
     }
 
     /**
+     * Scope a query to only include ongoing outages.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeOngoing($query)
+    {
+        return $query->whereNull('end_time');
+    }
+
+    /**
+     * Scope a query to only include completed outages.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeCompleted($query)
+    {
+        return $query->whereNotNull('end_time');
+    }
+
+    /**
      * Scope a query to only include outages between given dates.
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
@@ -116,11 +154,15 @@ class Outage extends Model
     public function scopeBetweenDates($query, $startDate, $endDate)
     {
         return $query->where('start_time', '>=', $startDate)
-                    ->where('end_time', '<=', $endDate);
+                    ->where(function($query) use ($endDate) {
+                        $query->where('end_time', '<=', $endDate)
+                              ->orWhereNull('end_time');
+                    });
     }
 
     /**
      * Scope a query to only include outages within duration range.
+     * For ongoing outages, uses the current time to calculate duration.
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
      * @param  int  $minMinutes
@@ -129,8 +171,17 @@ class Outage extends Model
      */
     public function scopeDurationBetween($query, $minMinutes, $maxMinutes)
     {
-        return $query->whereRaw('TIMESTAMPDIFF(MINUTE, start_time, end_time) >= ?', [$minMinutes])
-                    ->whereRaw('TIMESTAMPDIFF(MINUTE, start_time, end_time) <= ?', [$maxMinutes]);
+        return $query->where(function($query) use ($minMinutes, $maxMinutes) {
+            // For completed outages
+            $query->whereNotNull('end_time')
+                  ->whereRaw('TIMESTAMPDIFF(MINUTE, start_time, end_time) >= ?', [$minMinutes])
+                  ->whereRaw('TIMESTAMPDIFF(MINUTE, start_time, end_time) <= ?', [$maxMinutes]);
+        })->orWhere(function($query) use ($minMinutes, $maxMinutes) {
+            // For ongoing outages
+            $query->whereNull('end_time')
+                  ->whereRaw('TIMESTAMPDIFF(MINUTE, start_time, NOW()) >= ?', [$minMinutes])
+                  ->whereRaw('TIMESTAMPDIFF(MINUTE, start_time, NOW()) <= ?', [$maxMinutes]);
+        });
     }
 
     /**
