@@ -4,16 +4,18 @@
     "list_only_extensions": [".png",".jpg",".jpeg",".gif",".ico",".svg",".db",".sqlite",".pdf",".zip"],
     "max_file_size_mb": 5,
     "include_paths": [
-
-        "app/Models/User.php",
-        "app/Models/Outage.php",
-        "app/Models/Location.php",
-        "app/Http/Resources/CollectionResource.php",
-        "app/Http/Resources/UserResource.php",
-        "app/Http/Resources/OutageResource.php",
-        "app/Http/Controllers/AuthController.php",
-        "app/Http/Controllers/OutageController.php",
-        "app/Policies/OutagePolicy.php",
-        "routes/api.php"
-      ]
+    "app/Models/User.php",
+    "app/Models/Outage.php",
+    "app/Models/Location.php",
+    "app/Http/Resources/CollectionResource.php",
+    "app/Http/Resources/UserResource.php",
+    "app/Http/Resources/OutageResource.php",
+    "app/Http/Resources/LocationResource.php",
+    "app/Http/Controllers/AuthController.php",
+    "app/Http/Controllers/OutageController.php",
+    "app/Http/Controllers/LocationController.php",
+    "app/Policies/OutagePolicy.php",
+    "app/Policies/LocationPolicy.php",
+    "routes/api.php"
+  ]
 }

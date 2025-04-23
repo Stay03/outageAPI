@@ -32,10 +32,16 @@ class OutageResource extends JsonResource
                     'longitude' => $this->location->longitude,
                 ];
             }),
-            'weather_condition' => $this->weather_condition,
-            'temperature' => $this->temperature,
-            'wind_speed' => $this->wind_speed,
-            'precipitation' => $this->precipitation,
+            'weather' => [
+                'condition' => $this->weather_condition,
+                'temperature' => $this->temperature,
+                'wind_speed' => $this->wind_speed,
+                'precipitation' => $this->precipitation,
+                // Additional weather data
+                'humidity' => $this->when($this->humidity, $this->humidity),
+                'pressure' => $this->when($this->pressure, $this->pressure),
+                'cloud' => $this->when($this->cloud, $this->cloud),
+            ],
             'day_of_week' => $this->day_of_week,
             'is_holiday' => $this->is_holiday,
             'created_at' => $this->created_at,

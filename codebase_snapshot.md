@@ -1,7 +1,7 @@
 # Codebase Documentation
 
 {
-  "Extraction Date": "2025-04-22 20:23:52",
+  "Extraction Date": "2025-04-22 22:06:57",
   "Include Paths": [
     "app/Models/User.php",
     "app/Models/Outage.php",
@@ -9,9 +9,12 @@
     "app/Http/Resources/CollectionResource.php",
     "app/Http/Resources/UserResource.php",
     "app/Http/Resources/OutageResource.php",
+    "app/Http/Resources/LocationResource.php",
     "app/Http/Controllers/AuthController.php",
     "app/Http/Controllers/OutageController.php",
+    "app/Http/Controllers/LocationController.php",
     "app/Policies/OutagePolicy.php",
+    "app/Policies/LocationPolicy.php",
     "routes/api.php"
   ]
 }
@@ -500,6 +503,41 @@ class OutageResource extends JsonResource
 }
 ```
 
+### app/Http/Resources/LocationResource.php
+```
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class LocationResource extends JsonResource
+{
+    /**
+     * Transform the resource into an array.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return array|\Illuminate\Contracts\Support\Arrayable|\JsonSerializable
+     */
+    public function toArray($request)
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'address' => $this->address,
+            'locality' => $this->when($this->locality, $this->locality),
+            'city' => $this->when($this->city, $this->city),
+            'country' => $this->when($this->country, $this->country),
+            'latitude' => $this->latitude,
+            'longitude' => $this->longitude,
+            'full_address' => $this->full_address,
+            'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
+        ];
+    }
+}
+```
+
 ### app/Http/Controllers/AuthController.php
 ```
 <?php
@@ -826,6 +864,220 @@ class OutageController extends Controller
 }
 ```
 
+### app/Http/Controllers/LocationController.php
+```
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Http\Resources\CollectionResource;
+use App\Http\Resources\LocationResource;
+use App\Models\Location;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
+
+class LocationController extends Controller
+{
+    /**
+     * Display a listing of locations.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function index(Request $request)
+    {
+        $query = Location::query();
+
+        // Apply filters
+        if ($request->has('city')) {
+            $query->inCity($request->input('city'));
+        }
+
+        if ($request->has('locality')) {
+            $query->inLocality($request->input('locality'));
+        }
+
+        if ($request->has('country')) {
+            $query->inCountry($request->input('country'));
+        }
+
+        // Apply radius search if latitude, longitude, and radius are provided
+        if ($request->has(['latitude', 'longitude', 'radius'])) {
+            $query->withinRadius(
+                $request->input('latitude'),
+                $request->input('longitude'),
+                $request->input('radius')
+            );
+        }
+
+        // Apply search by name or address
+        if ($request->has('search')) {
+            $searchTerm = $request->input('search');
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('name', 'LIKE', "%{$searchTerm}%")
+                  ->orWhere('address', 'LIKE', "%{$searchTerm}%");
+            });
+        }
+
+        // Apply sorting
+        $sortBy = $request->input('sort_by', 'name');
+        $order = $request->input('order', 'asc');
+        $query->orderBy($sortBy, $order);
+
+        // Apply pagination
+        $perPage = min(100, $request->input('per_page', 15));
+        $page = $request->input('page', 1);
+        $locations = $query->paginate($perPage, ['*'], 'page', $page);
+
+        return new CollectionResource($locations);
+    }
+
+    /**
+     * Store a newly created location in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function store(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'address' => 'required|string|max:255',
+            'locality' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:255',
+            'country' => 'nullable|string|max:255',
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        // Check for duplicate locations
+        $existingLocation = Location::where('latitude', $request->input('latitude'))
+                                    ->where('longitude', $request->input('longitude'))
+                                    ->first();
+
+        if ($existingLocation) {
+            return response()->json([
+                'message' => 'A location with these coordinates already exists',
+                'location' => new LocationResource($existingLocation)
+            ], 409);
+        }
+
+        // Create a new location
+        $location = Location::create($request->all());
+
+        return response()->json([
+            'message' => 'Location created successfully',
+            'location' => new LocationResource($location)
+        ], 201);
+    }
+
+    /**
+     * Display the specified location.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function show($id)
+    {
+        $location = Location::findOrFail($id);
+
+        // Verify authorization
+        $this->authorize('view', $location);
+
+        return response()->json([
+            'location' => new LocationResource($location)
+        ]);
+    }
+
+    /**
+     * Update the specified location in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function update(Request $request, $id)
+    {
+        $location = Location::findOrFail($id);
+
+        // Verify authorization
+        $this->authorize('update', $location);
+
+        $validator = Validator::make($request->all(), [
+            'name' => 'sometimes|required|string|max:255',
+            'address' => 'sometimes|required|string|max:255',
+            'locality' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:255',
+            'country' => 'nullable|string|max:255',
+            'latitude' => 'sometimes|required|numeric|between:-90,90',
+            'longitude' => 'sometimes|required|numeric|between:-180,180',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        // If coordinates are changing, check for duplicates
+        if ($request->has('latitude') || $request->has('longitude')) {
+            $lat = $request->input('latitude', $location->latitude);
+            $lng = $request->input('longitude', $location->longitude);
+            
+            $existingLocation = Location::where('id', '!=', $id)
+                                        ->where('latitude', $lat)
+                                        ->where('longitude', $lng)
+                                        ->first();
+            
+            if ($existingLocation) {
+                return response()->json([
+                    'message' => 'A location with these coordinates already exists',
+                    'location' => new LocationResource($existingLocation)
+                ], 409);
+            }
+        }
+
+        // Update the location
+        $location->update($request->all());
+
+        return response()->json([
+            'message' => 'Location updated successfully',
+            'location' => new LocationResource($location)
+        ]);
+    }
+
+    /**
+     * Remove the specified location from storage.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function destroy($id)
+    {
+        $location = Location::findOrFail($id);
+
+        // Verify authorization
+        $this->authorize('delete', $location);
+
+        // Check for associated outages (also handled in policy)
+        if ($location->outages()->count() > 0) {
+            return response()->json([
+                'message' => 'Cannot delete location with associated outages'
+            ], 409);
+        }
+
+        $location->delete();
+
+        return response()->json([
+            'message' => 'Location deleted successfully'
+        ]);
+    }
+}
+```
+
 ### app/Policies/OutagePolicy.php
 ```
 <?php
@@ -900,12 +1152,97 @@ class OutagePolicy
 }
 ```
 
+### app/Policies/LocationPolicy.php
+```
+<?php
+
+namespace App\Policies;
+
+use App\Models\Location;
+use App\Models\User;
+use Illuminate\Auth\Access\HandlesAuthorization;
+
+class LocationPolicy
+{
+    use HandlesAuthorization;
+
+    /**
+     * Determine whether the user can view any models.
+     *
+     * @param  \App\Models\User  $user
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function viewAny(User $user)
+    {
+        return true; // Authenticated users can view locations
+    }
+
+    /**
+     * Determine whether the user can view the model.
+     *
+     * @param  \App\Models\User  $user
+     * @param  \App\Models\Location  $location
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function view(User $user, Location $location)
+    {
+        // Locations can be viewed by any authenticated user
+        // This could be modified if locations become user-specific
+        return true;
+    }
+
+    /**
+     * Determine whether the user can create models.
+     *
+     * @param  \App\Models\User  $user
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function create(User $user)
+    {
+        return true; // Authenticated users can create locations
+    }
+
+    /**
+     * Determine whether the user can update the model.
+     *
+     * @param  \App\Models\User  $user
+     * @param  \App\Models\Location  $location
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function update(User $user, Location $location)
+    {
+        // For now, any authenticated user can update locations
+        // You might want to implement ownership for locations in the future
+        return true;
+    }
+
+    /**
+     * Determine whether the user can delete the model.
+     *
+     * @param  \App\Models\User  $user
+     * @param  \App\Models\Location  $location
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function delete(User $user, Location $location)
+    {
+        // Check if location has any associated outages
+        // Prevent deletion if outages exist
+        if ($location->outages()->count() > 0) {
+            return false;
+        }
+        
+        return true;
+    }
+}
+```
+
 ### routes/api.php
 ```
 <?php
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\OutageController;
+use App\Http\Controllers\LocationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -938,6 +1275,9 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         // Outage routes
         Route::apiResource('outages', OutageController::class);
+        
+        // Location routes
+        Route::apiResource('locations', LocationController::class);
         
         // Analytics routes will be added here later
     });

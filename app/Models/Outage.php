@@ -26,6 +26,10 @@ class Outage extends Model
         'precipitation',
         'day_of_week',
         'is_holiday',
+        // Additional weather fields
+        'humidity',
+        'pressure',
+        'cloud',
     ];
 
     /**
@@ -41,6 +45,10 @@ class Outage extends Model
         'precipitation' => 'float',
         'day_of_week' => 'integer',
         'is_holiday' => 'boolean',
+        // Additional weather field casts
+        'humidity' => 'integer',
+        'pressure' => 'float',
+        'cloud' => 'integer',
     ];
 
     /**
